@@ -3,7 +3,8 @@ open Vector
 type fb = { data: Vector.t array; width: int; height: int }
 
 type shape = Sphere of Vector.t * float
-type hittable = { shape: shape; colour: Vector.t; specular_component: float }
+type material = { diffuse_colour: Vector.t; albedo: Vector.t; specular: float }
+type hittable = { shape: shape; material: material }
 type light =
   | Point_light of Vector.t * float
   | Ambient_light of float
@@ -70,17 +71,16 @@ let hit_colour ray hit_obj hit_point hit_normal { objects; lights } =
   let diffuse_intensity light_intensity light_dir =
     light_intensity *. (max 0. (min 1. (dot hit_normal light_dir)))
   in
-  let specular_intensity light_dir =
+  let specular_intensity light_intensity light_dir =
     let reflect = light_dir @- ((hit_normal @*. dot light_dir hit_normal) @*. 2.) in
     (* sets the intensity on the back half of the object to 0 *)
-     Float.pow (dot reflect ray.direction |> max 0.) 50.
+     light_intensity *. (Float.pow (dot reflect ray.direction |> max 0.) hit_obj.material.specular)
   in
   let shadowed light_dir light_dist =
-    let shadow_origin = if length (light_dir @* hit_normal) < 0.
-                        then hit_point @- (hit_normal @*. 1e-3)
-                        else hit_point @+ (hit_normal @*. 1e-3)
-    in
-    let shadow_ray = { origin = shadow_origin; direction = light_dir } in
+    (* offset the shadow ray's origin to avoid occlusion *)
+    let (@+/-) = if length (light_dir @* hit_normal) < 0. then (@-) else (@+) in
+    let origin = hit_point @+/- (hit_normal @*. 1e-3) in
+    let shadow_ray = { origin = origin; direction = light_dir } in
     let shadow_hits = List.filter_map (intersect shadow_ray) objects in
     List.exists (fun (_, shadow_hit_dist) ->
         shadow_hit_dist < light_dist)
@@ -97,17 +97,17 @@ let hit_colour ray hit_obj hit_point hit_normal { objects; lights } =
        then (di_acc, si_acc, amb_acc)
        else
          let di = di_acc +. diffuse_intensity intensity light_dir in
-         let si = si_acc +. specular_intensity light_dir in
+         let si = si_acc +. specular_intensity intensity light_dir in
          (di, si, amb_acc)
   in
   let (di, si, amb) = List.fold_left accumulate_lighting (0., 0., 0.) lights in
-  Fun.(hit_obj.colour
-       |> flip (@*.) di
-       |> flip (@+.) (si *. hit_obj.specular_component)
+  Fun.(hit_obj.material.diffuse_colour
+       |> flip (@*.) (di *. hit_obj.material.albedo.x)
+       |> flip (@+.) (si *. hit_obj.material.albedo.y) 
        |> flip (@+.) amb)
 
 let cast_ray ray scene =
-  let background_colour = { x = 0. ; y = 0. ; z = 0. } in
+  let background_colour = { x = 0.2 ; y = 0.7 ; z = 0.8 } in
   match intersect_scene ray scene.objects with
   | Some (closest_obj, _, hit_point, hit_normal) ->
      hit_colour ray closest_obj hit_point hit_normal scene
@@ -172,26 +172,20 @@ let print_fb filename { data; width; height } =
     raise e
 
 let () =
+  let ivory = { diffuse_colour = { x = 0.4; y = 0.4; z = 0.3 };
+                albedo = { x = 0.4; y = 0.4; z = 0.3 };
+                specular = 50. } in
+  let red_rubber = { diffuse_colour = { x = 0.3; y = 0.1; z = 0.1 };
+                     albedo = { x = 0.9; y = 0.1; z = 0.1 };
+                     specular = 10. } in
   let scene =
-    { objects = [ { shape = Sphere ({ x = -0.7; y = -0.4; z = -9.0 }, 3.);
-                    colour = { x = 0.0; y = 0.0; z = 1.0 }; 
-                    specular_component = 0.4 };
-                  { shape = Sphere ({ x = 0.8; y = 1.1; z = -3.0 }, 1.);
-                    colour = { x = 0.0; y = 1.0; z = 0.0 };
-                    specular_component = 0.4 };
-                  { shape = Sphere ({ x = 0.5; y = 0.5; z = -2.0 }, 0.2);
-                    colour = { x = 1.0; y = 1.0; z = 0.0 };
-                    specular_component = 0.4 };
-                  { shape = Sphere ({ x = 0.2; y = 0.2; z = -7.0 }, 1.4);
-                    colour = { x = 1.; y = 0.0; z = 0.0 };
-                    specular_component = 0.4 };
-                  { shape = Sphere ({ x = 0.0; y = -14.0; z = -9.0 }, 12.);
-                    colour = { x = 1.; y = 0.5; z = 0.0 };
-                    specular_component = 0.4 }
+    { objects = [ { shape = Sphere ({ x = -3.; y = 0.; z = -16.0 }, 2.); material = ivory; };
+                  { shape = Sphere ({ x = -1.; y = -1.5; z = -12.0 }, 2.); material = red_rubber; };
+                  { shape = Sphere ({ x = 1.5; y = -0.5; z = -18.0 }, 3.); material = red_rubber; };
+                  { shape = Sphere ({ x = 7.; y = 5.; z = -18.0 }, 4.); material = ivory; };
                 ];
-      lights = [ Point_light ({ x = -20.; y = 20.; z = 20. }, 0.5);
-                 Point_light ({ x = 30.; y = 50.; z = -25. }, 0.5);
-                 Point_light ({ x = 30.; y = 20.; z = 30. }, 0.5); 
-                 Ambient_light (0.1) ] }
-  in
-  render 1000 1000 scene |> print_fb "out.ppm" 
+      lights = [ Point_light ({ x = -20.; y = 20.; z = 20. }, 1.5);
+                 Point_light ({ x = 30.; y = 50.; z = -25. }, 1.8);
+                 Point_light ({ x = 30.; y = 20.; z = 30. }, 1.7); 
+                 Ambient_light (0.0)  ] }
+  in render 1000 1000 scene |> print_fb "out.ppm" 

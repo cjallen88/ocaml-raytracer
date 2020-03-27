@@ -1,0 +1,4 @@
+(executable
+ (name raytracer)
+ (flags (:standard -w +A -warn-error +A-32))
+ (libraries lwt reason))

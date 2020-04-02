@@ -11,6 +11,8 @@ type light =
 type scene = { objects : hittable list; lights: light list }
 type ray = { origin: Vector.t; direction: Vector.t } 
 
+let depth_limit = 4
+
 (* reduces `list` with `fn`, accessing each element with key_fn *)
 let find_by fn key_fn list =
   match list with
@@ -67,16 +69,17 @@ let intersect_scene ray objects =
 See https://github.com/ssloy/tinyraytracer/commit/9a728fff2bbebb1eedd86e1ac89f657d43191609
 https://www.youtube.com/watch?v=5apJJKd4z-
 http://learnwebgl.brown37.net/09_lights/lights_specular.htm*)
-let rec hit_colour ray hit_obj hit_point hit_normal { objects; lights } =
+let rec hit_colour ray hit_obj hit_point hit_normal scene depth =
   let reflect light_dir hit_normal = light_dir @- ((hit_normal @*. dot light_dir hit_normal) @*. 2.) in
+  (* offsets a ray's origin to prevent accidental occlusion *)
+  let offset_origin ray_direction =
+    let (@+/-) = if (dot ray_direction hit_normal) < 0. then (@-) else (@+) in
+    hit_point @+/- (hit_normal @*. 1e-3)
+  in
   let reflect_colour =
-    let reflect_dir = reflect ray.direction hit_normal in
-    let (@+/-) = if length (reflect_dir @* hit_normal) < 0. then (@-) else (@+) in
-    let reflect_orig = hit_point @+/- (hit_normal @*. 1e-3) in
-    let reflect_ray =
-        { origin = reflect_orig;
-          direction = reflect_dir; } in
-    cast_ray reflect_ray { objects; lights }
+    let reflected_dir = normalize (reflect ray.direction hit_normal) in
+    let reflect_ray = { origin = offset_origin reflected_dir; direction = reflected_dir } in
+    cast_ray reflect_ray scene (depth + 1)
   in
   let diffuse_intensity light_intensity light_dir =
     light_intensity *. (max 0. (min 1. (dot hit_normal light_dir)))
@@ -88,10 +91,8 @@ let rec hit_colour ray hit_obj hit_point hit_normal { objects; lights } =
   in
   let shadowed light_dir light_dist =
     (* offset the shadow ray's origin to avoid occlusion *)
-    let (@+/-) = if length (light_dir @* hit_normal) < 0. then (@-) else (@+) in
-    let origin = hit_point @+/- (hit_normal @*. 1e-3) in
-    let shadow_ray = { origin = origin; direction = light_dir } in
-    let shadow_hits = List.filter_map (intersect shadow_ray) objects in
+    let shadow_ray = { origin = offset_origin light_dir; direction = light_dir } in
+    let shadow_hits = List.filter_map (intersect shadow_ray) scene.objects in
     List.exists (fun (_, shadow_hit_dist) ->
         shadow_hit_dist < light_dist)
       shadow_hits
@@ -110,18 +111,21 @@ let rec hit_colour ray hit_obj hit_point hit_normal { objects; lights } =
          let si = si_acc +. specular_intensity intensity light_dir in
          (di, si, amb_acc)
   in
-  let (di, si, amb) = List.fold_left accumulate_lighting (0., 0., 0.) lights in
+  let (di, si, amb) = List.fold_left accumulate_lighting (0., 0., 0.) scene.lights in
   Fun.(hit_obj.material.diffuse_colour
        |> flip (@*.) (di *. hit_obj.material.albedo.x)
        |> flip (@+.) (si *. hit_obj.material.albedo.y)
        |> flip (@+) (reflect_colour @*. hit_obj.material.albedo.z)
        |> flip (@+.) amb)
 
-and cast_ray ray scene =
+and cast_ray ray scene depth =
   let background_colour = { x = 0.2 ; y = 0.7 ; z = 0.8 } in
+  if depth = depth_limit
+  then background_colour
+  else
   match intersect_scene ray scene.objects with
   | Some (closest_obj, _, hit_point, hit_normal) ->
-     hit_colour ray closest_obj hit_point hit_normal scene
+       hit_colour ray closest_obj hit_point hit_normal scene depth
   | None -> background_colour
 
 (* calculates the 3d coords to cast a ray at, from the raster grid the image will be drawn with
@@ -150,12 +154,13 @@ let render height width scene =
       for _ = 0 to no_samples - 1 do
         (* map each x/y coord to ndc (map to real world) to calculate direction of ray *)
         let x = (raster_to_camera_coord i width false
-                 *. ((Float.of_int width) /. (Float.of_int height))) in  (* correct for aspect ratio, assuming width > height *)
+                 (* correct for aspect ratio, assuming width > height *)
+                 *. ((Float.of_int width) /. (Float.of_int height))) in  
         let y = raster_to_camera_coord j height true in
         let direction = normalize { x; y; z = -. 1. } in
         let ray = { origin = { x = 0.; y = 0.; z = 0. };
                     direction } in
-        total_colour := !total_colour @+ cast_ray ray scene;
+        total_colour := !total_colour @+ cast_ray ray scene 0;
       done;
       data.(i + (j * width)) <- !total_colour @/. Float.of_int no_samples
     done;

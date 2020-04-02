@@ -1,14 +1,14 @@
 type t = { x: float; y: float; z: float }
 
 let (@*) v1 v2 =
-           { x = v1.x *. v2.x;
-             y = v1.y *. v2.y;
-             z = v1.z *. v2.z }
+  { x = v1.x *. v2.x;
+    y = v1.y *. v2.y;
+    z = v1.z *. v2.z }
          
 let (@*.) { x; y; z } f =
-           { x = x *. f;
-             y = y *. f;
-             z = z *. f }
+  { x = x *. f;
+    y = y *. f;
+    z = z *. f }
          
 let (@+) v1 v2 =
   { x = v1.x +. v2.x;

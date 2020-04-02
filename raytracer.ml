@@ -3,7 +3,13 @@ open Vector
 type fb = { data: Vector.t array; width: int; height: int }
 
 type shape = Sphere of Vector.t * float
-type material = { diffuse_colour: Vector.t; albedo: Vector.t; specular: float }
+type material = { diffuse_colour: Vector.t;
+                  specular_exp: float;
+                  diffuse_albedo: float;
+                  specular_albedo: float;
+                  reflective_albedo: float;
+                  refractive_albedo: float;
+                  refractive_index: float }
 type hittable = { shape: shape; material: material }
 type light =
   | Point_light of Vector.t * float
@@ -87,7 +93,7 @@ let rec hit_colour ray hit_obj hit_point hit_normal scene depth =
   let specular_intensity light_intensity light_dir =
     let reflect = light_dir @- ((hit_normal @*. dot light_dir hit_normal) @*. 2.) in
     (* sets the intensity on the back half of the object to 0 *)
-     light_intensity *. (Float.pow (dot reflect ray.direction |> max 0.) hit_obj.material.specular)
+    light_intensity *. (Float.pow (dot reflect ray.direction |> max 0.) hit_obj.material.specular_exp)
   in
   let shadowed light_dir light_dist =
     (* offset the shadow ray's origin to avoid occlusion *)
@@ -113,9 +119,9 @@ let rec hit_colour ray hit_obj hit_point hit_normal scene depth =
   in
   let (di, si, amb) = List.fold_left accumulate_lighting (0., 0., 0.) scene.lights in
   Fun.(hit_obj.material.diffuse_colour
-       |> flip (@*.) (di *. hit_obj.material.albedo.x)
-       |> flip (@+.) (si *. hit_obj.material.albedo.y)
-       |> flip (@+) (reflect_colour @*. hit_obj.material.albedo.z)
+       |> flip (@*.) (di *. hit_obj.material.diffuse_albedo)
+       |> flip (@+.) (si *. hit_obj.material.specular_albedo) 
+       |> flip (@+) (reflect_colour @*. hit_obj.material.reflective_albedo)
        |> flip (@+.) amb)
 
 and cast_ray ray scene depth =
@@ -189,17 +195,36 @@ let print_fb filename { data; width; height } =
 
 let () =
   let ivory = { diffuse_colour = { x = 0.4; y = 0.4; z = 0.3 };
-                albedo = { x = 0.4; y = 0.4; z = 0.3 };
-                specular = 50. } in
+                diffuse_albedo = 0.6;
+                specular_albedo = 0.3;
+                reflective_albedo = 0.1;
+                refractive_albedo = 0.;
+                specular_exp = 50.;
+                refractive_index = 1. } in
   let red_rubber = { diffuse_colour = { x = 0.3; y = 0.1; z = 0.1 };
-                     albedo = { x = 0.9; y = 0.1; z = 0.1 };
-                     specular = 10. } in
-  let mirror = { diffuse_colour = { x = 0.1; y = 0.1; z = 0.1 };
-                 albedo = { x = 0.0; y = 10.0; z = 0.8 };
-                 specular = 1425. } in
+                     diffuse_albedo = 0.9;
+                     specular_albedo = 0.1;
+                     reflective_albedo = 0.;
+                     refractive_albedo = 0.;
+                     specular_exp = 10.;
+                     refractive_index = 1. } in
+  let mirror = { diffuse_colour = { x = 1.; y = 1.; z = 1. };
+                 diffuse_albedo = 0.;
+                 specular_albedo = 10.;
+                 reflective_albedo = 0.8;
+                 refractive_albedo = 0.;
+                 specular_exp = 1425.;
+                 refractive_index = 1. } in
+  let glass = { diffuse_colour = { x = 0.6; y = 0.7; z = 0.8 };
+                diffuse_albedo = 0.;
+                specular_albedo = 0.5;
+                reflective_albedo = 0.1;
+                refractive_albedo = 0.8;
+                specular_exp = 125.;
+                refractive_index = 1.5 } in
   let scene =
     { objects = [ { shape = Sphere ({ x = -3.; y = 0.; z = -16.0 }, 2.); material = ivory; };
-                  { shape = Sphere ({ x = -1.; y = -1.5; z = -12.0 }, 2.); material = mirror; };
+                  { shape = Sphere ({ x = -1.; y = -1.5; z = -12.0 }, 2.); material = glass; };
                   { shape = Sphere ({ x = 1.5; y = -0.5; z = -18.0 }, 3.); material = red_rubber; };
                   { shape = Sphere ({ x = 7.; y = 5.; z = -18.0 }, 4.); material = mirror; };
                 ];

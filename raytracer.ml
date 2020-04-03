@@ -70,13 +70,31 @@ let rec hit_colour ray hit_obj hit_point hit_normal scene depth =
   let reflect light_dir hit_normal = light_dir @- ((hit_normal @*. dot light_dir hit_normal) @*. 2.) in
   (* offsets a ray's origin to prevent accidental occlusion *)
   let offset_origin ray_direction =
-    let (@+/-) = if (dot ray_direction hit_normal) < 0. then (@-) else (@+) in
+    let outside = (dot ray_direction hit_normal) < 0. in
+    let (@+/-) = if outside then (@-) else (@+) in
     hit_point @+/- (hit_normal @*. 1e-3)
   in
   let reflect_colour =
     let reflected_dir = normalize (reflect ray.direction hit_normal) in
     let reflect_ray = { origin = offset_origin reflected_dir; direction = reflected_dir } in
     cast_ray reflect_ray scene (depth + 1)
+  in
+  let refract_colour =
+    (* refraction using Snell's law, will often be called leaving air, which is RI 1. *)
+    let rec refract light_dir hit_normal material_refractive_index air_refractive_index =
+      let cosi = dot light_dir hit_normal |> max (-1.) |> min 1. |> (~-.) in
+      if cosi < 0. (* if the ray comes from the inside the object, swap the air and the media *)
+      then refract light_dir (negate hit_normal) air_refractive_index material_refractive_index
+      else
+        let eta = air_refractive_index /. material_refractive_index in
+        let k = 1. -. eta *. eta *. (1. -. cosi *. cosi) in
+        if k < 0. (* total internal reflection *)
+        then { x = 0.; y = 0.; z = 0. }
+        else (light_dir @*. eta) @+ (hit_normal @*. (eta *. cosi -. sqrt k)) 
+    in
+    let refracted_dir = normalize (refract ray.direction hit_normal hit_obj.material.refractive_index 1.) in
+    let refract_ray = { origin = offset_origin refracted_dir; direction = refracted_dir } in
+    cast_ray refract_ray scene (depth + 1)
   in
   let diffuse_intensity light_intensity light_dir =
     light_intensity *. (max 0. (min 1. (dot hit_normal light_dir)))
@@ -113,6 +131,7 @@ let rec hit_colour ray hit_obj hit_point hit_normal scene depth =
        |> flip (@*.) (di *. hit_obj.material.diffuse_albedo)
        |> flip (@+.) (si *. hit_obj.material.specular_albedo) 
        |> flip (@+) (reflect_colour @*. hit_obj.material.reflective_albedo)
+       |> flip (@+) (refract_colour @*. hit_obj.material.refractive_albedo)
        |> flip (@+.) amb)
 
 and cast_ray ray scene depth =

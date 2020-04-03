@@ -82,7 +82,7 @@ let rec hit_colour ray hit_obj hit_point hit_normal scene depth =
     light_intensity *. (max 0. (min 1. (dot hit_normal light_dir)))
   in
   let specular_intensity light_intensity light_dir =
-    let reflect = light_dir @- ((hit_normal @*. dot light_dir hit_normal) @*. 2.) in
+    let reflect = reflect light_dir hit_normal in
     (* sets the intensity on the back half of the object to 0 *)
     light_intensity *. (Float.pow (dot reflect ray.direction |> max 0.) hit_obj.material.specular_exp)
   in

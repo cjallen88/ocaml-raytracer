@@ -35,29 +35,20 @@ let find_by fn key_fn list =
 (* Returns intersect entrace and hit distance
 See https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-sphere-intersection*)
 let intersect ray obj =
-  let { shape; _ } = obj in
-  match shape with
+  match obj.shape with
   | Sphere (centre, radius) ->
      let o_to_c = centre @- ray.origin in
      let tca = dot o_to_c ray.direction in
-     let sphere_behind_ray = tca < 0. in
-     if sphere_behind_ray
-     then
-       let hit_dist = length o_to_c in
-       if hit_dist <= radius  (* is origin inside sphere? *)
-       then Some (obj, hit_dist)
-       else None
-     else (* else centre of sphere projects on the array *)
        let dist_sqrd = (dot o_to_c o_to_c) -. (tca *. tca) in
        let radius_sqrd = radius *. radius in
        if dist_sqrd > radius_sqrd
        then None
        else
          let thc = sqrt (radius_sqrd -. dist_sqrd) in
-         let t0 = tca -. thc in
+       let t0 = ref (tca -. thc) in
          let t1 = tca +. thc in
-         let hit_dist = min t0 t1 in
-         Some (obj, hit_dist)
+       if !t0 < 0. then t0 := t1;
+       if !t0 < 0. then None else Some (obj, !t0)
 
 (* Returns closest of all the hits, along with the hit point and normal *)
 let intersect_scene ray objects =

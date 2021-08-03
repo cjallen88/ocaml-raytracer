@@ -160,6 +160,7 @@ let raster_to_camera_coord axis_pos axis_scale y_coord =
   let scale = degrees_to_radians (fov_angle *. 0.5) |> Float.tan in
   screenspace_coord *. scale
 
+(* Render a scene to a framebuffer *)
 let render height width scene =
   let no_cells = height * width in
   let data = Array.make no_cells { x=0.; y = 0.; z = 0. } in
@@ -204,6 +205,7 @@ let print_fb filename { data; width; height } =
     raise e
 
 let () =
+  (* Set up materials *)
   let ivory = { diffuse_colour = { x = 0.4; y = 0.4; z = 0.3 };
                 diffuse_albedo = 0.6;
                 specular_albedo = 0.3;
@@ -232,6 +234,7 @@ let () =
                 refractive_albedo = 0.8;
                 specular_exp = 125.;
                 refractive_index = 1.5 } in
+  (* Construct scene and render *)
   let scene =
     { objects = [ { shape = Sphere ({ x = -3.; y = 0.; z = -16.0 }, 2.); material = ivory; };
                   { shape = Sphere ({ x = -1.; y = -1.5; z = -12.0 }, 2.); material = glass; };
@@ -241,5 +244,6 @@ let () =
       lights = [ Point_light ({ x = -20.; y = 20.; z = 20. }, 1.5);
                  Point_light ({ x = 30.; y = 50.; z = -25. }, 1.8);
                  Point_light ({ x = 30.; y = 20.; z = 30. }, 1.7); 
-                 Ambient_light (0.0)  ] }
+                 Ambient_light (0.0)
+               ] }
   in render 1000 1000 scene |> print_fb "out.ppm" 

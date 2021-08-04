@@ -1,8 +1,16 @@
 open Vector
 
+(********************
+ * TYPE DEFINITIONS *
+ ********************)
+
+(* framebuffer type to hold a rendered scene, and its dimensions *)
 type fb = { data: Vector.t array; width: int; height: int }
 
+(* renderable shapes *)
 type shape = Sphere of Vector.t * float
+
+(* materials affect the colour of a pixel when its ray hits a shape *)
 type material = { diffuse_colour: Vector.t;
                   specular_exp: float;
                   diffuse_albedo: float;
@@ -10,45 +18,69 @@ type material = { diffuse_colour: Vector.t;
                   reflective_albedo: float;
                   refractive_albedo: float;
                   refractive_index: float }
+
+(* a hittable is an object in the world to be rendered *)
 type hittable = { shape: shape; material: material }
+
+(* lights are not rendered themselves, but affect the brightness of hittables
+   and create shadows *)
 type light =
   | Point_light of Vector.t * float
   | Ambient_light of float
+
+(* scenes are collections of things to render, and lights *)
 type scene = { objects : hittable list; lights: light list }
+
+(* rays are cast at the scene to determine pixel colours *)
 type ray = { origin: Vector.t; direction: Vector.t } 
 
-let depth_limit = 4
+(***********
+ * GLOBALS *
+ ***********)
 
-(* reduces `list` with `fn`, accessing each element with key_fn *)
+(* We limit reflection depth for performance reasons *)
+let reflection_depth_limit = 4
+let background_colour = { x = 0.2 ; y = 0.7 ; z = 0.8 }
+
+(****************
+ * UTILITY FUNS *
+ ****************)
+
+(* reduces `list` with `fn`, accessing each element with key_fn 
+   example: find_by (<) (fun (_, hit_dist) -> hit_dist) hits *)
 let find_by fn key_fn list =
   match list with
   | [] -> None
   | [b] -> Some b
   | hd::tl ->
-  let folder (acc: 'a) (x: 'a) : 'a =
-    if fn (key_fn x) (key_fn acc)
-    then x
-    else acc
-  in
-  Some (List.fold_left folder hd tl)
+    let folder (acc: 'a) (x: 'a) : 'a =
+      if fn (key_fn x) (key_fn acc)
+      then x
+      else acc
+    in
+    Some (List.fold_left folder hd tl)
 
-(* Returns intersect entrace and hit distance
-See https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-sphere-intersection*)
+(***********************
+ * MAIN IMPLEMENTATION *
+ ***********************)
+
+(* If a ray hits the obj, returns intersect entrace and hit distance
+   See https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-sphere-intersection*)
 let intersect ray obj =
   match obj.shape with
   | Sphere (centre, radius) ->
-     let o_to_c = centre @- ray.origin in
-     let tca = dot o_to_c ray.direction in
-       let dist_sqrd = (dot o_to_c o_to_c) -. (tca *. tca) in
-       let radius_sqrd = radius *. radius in
-       if dist_sqrd > radius_sqrd
-       then None
-       else
-         let thc = sqrt (radius_sqrd -. dist_sqrd) in
-       let t0 = ref (tca -. thc) in
-         let t1 = tca +. thc in
-       if !t0 < 0. then t0 := t1;
-       if !t0 < 0. then None else Some (obj, !t0)
+    let o_to_c = centre @- ray.origin in
+    let tca = dot o_to_c ray.direction in
+    let dist_sqrd = (dot o_to_c o_to_c) -. (tca *. tca) in
+    let radius_sqrd = radius *. radius in
+    if dist_sqrd > radius_sqrd
+    then None
+    else
+      let thc = sqrt (radius_sqrd -. dist_sqrd) in
+      let t0 = ref (tca -. thc) in
+      let t1 = tca +. thc in
+      if !t0 < 0. then t0 := t1;
+      if !t0 < 0. then None else Some (obj, !t0)
 
 (* Returns closest of all the hits, along with the hit point and normal *)
 let intersect_scene ray objects =
@@ -57,15 +89,15 @@ let intersect_scene ray objects =
   match closest with
   | None -> None
   | Some (obj, hit_dist) ->
-     let hit_point = ray.origin @+ (ray.direction @*. hit_dist) in
-     let hit_normal = match obj.shape with
-       | Sphere (centre, _) -> hit_point @- centre |> normalize in
-     Some (obj, hit_dist, hit_point, hit_normal)
+    let hit_point = ray.origin @+ (ray.direction @*. hit_dist) in
+    let hit_normal = match obj.shape with
+      | Sphere (centre, _) -> hit_point @- centre |> normalize in
+    Some (obj, hit_dist, hit_point, hit_normal)
 
 (* Returns the colour of the ray that intersected an object
-See https://github.com/ssloy/tinyraytracer/commit/9a728fff2bbebb1eedd86e1ac89f657d43191609
-https://www.youtube.com/watch?v=5apJJKd4z-
-http://learnwebgl.brown37.net/09_lights/lights_specular.htm*)
+   See https://github.com/ssloy/tinyraytracer/commit/9a728fff2bbebb1eedd86e1ac89f657d43191609
+   https://www.youtube.com/watch?v=5apJJKd4z-
+   http://learnwebgl.brown37.net/09_lights/lights_specular.htm*)
 let rec hit_colour ray hit_obj hit_point hit_normal scene depth =
   let reflect light_dir hit_normal = light_dir @- ((hit_normal @*. dot light_dir hit_normal) @*. 2.) in
   (* offsets a ray's origin to prevent accidental occlusion *)
@@ -114,17 +146,17 @@ let rec hit_colour ray hit_obj hit_point hit_normal scene depth =
   in
   let accumulate_lighting (di_acc, si_acc, amb_acc) = function
     | Ambient_light intensity ->
-       (di_acc, si_acc, amb_acc +. intensity)
+      (di_acc, si_acc, amb_acc +. intensity)
     | Point_light (pos, intensity) ->
-       let light_to_hp = pos @- hit_point in
-       let light_dir = normalize light_to_hp in
-       let light_dist = length light_to_hp in
-       if shadowed light_dir light_dist
-       then (di_acc, si_acc, amb_acc)
-       else
-         let di = di_acc +. diffuse_intensity intensity light_dir in
-         let si = si_acc +. specular_intensity intensity light_dir in
-         (di, si, amb_acc)
+      let light_to_hp = pos @- hit_point in
+      let light_dir = normalize light_to_hp in
+      let light_dist = length light_to_hp in
+      if shadowed light_dir light_dist
+      then (di_acc, si_acc, amb_acc)
+      else
+        let di = di_acc +. diffuse_intensity intensity light_dir in
+        let si = si_acc +. specular_intensity intensity light_dir in
+        (di, si, amb_acc)
   in
   let (di, si, amb) = List.fold_left accumulate_lighting (0., 0., 0.) scene.lights in
   Fun.(hit_obj.material.diffuse_colour
@@ -135,18 +167,17 @@ let rec hit_colour ray hit_obj hit_point hit_normal scene depth =
        |> flip (@+.) amb)
 
 and cast_ray ray scene depth =
-  let background_colour = { x = 0.2 ; y = 0.7 ; z = 0.8 } in
-  if depth = depth_limit
+  if depth = reflection_depth_limit
   then background_colour
   else
-  match intersect_scene ray scene.objects with
-  | Some (closest_obj, _, hit_point, hit_normal) ->
-       hit_colour ray closest_obj hit_point hit_normal scene depth
-  | None -> background_colour
+    match intersect_scene ray scene.objects with
+    | Some (closest_obj, _, hit_point, hit_normal) ->
+      hit_colour ray closest_obj hit_point hit_normal scene depth
+    | None -> background_colour
 
 (* calculates the 3d coords to cast a ray at, from the raster grid the image will be drawn with
-See https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-generating-camera-rays/generating-camera-rays
-antialiasing: https://raytracing.github.io/books/RayTracingInOneWeekend.html#antialiasing *)
+   See https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-generating-camera-rays/generating-camera-rays
+   antialiasing: https://raytracing.github.io/books/RayTracingInOneWeekend.html#antialiasing *)
 let raster_to_camera_coord axis_pos axis_scale y_coord =
   let degrees_to_radians x = Float.pi *. (x /. 180.) in
   (* let radians_to_degrees x = (radians *. 180.) / pi in *)
@@ -154,8 +185,8 @@ let raster_to_camera_coord axis_pos axis_scale y_coord =
   let ndc = (Float.of_int axis_pos +. Random.float 1.0) /. Float.of_int axis_scale in
   (* convert x ndc to screenspace [-1,1] *)
   let screenspace_coord = if y_coord
-                          then 1. -. (ndc *. 2.)
-                          else (ndc *. 2.) -. 1. in
+    then 1. -. (ndc *. 2.)
+    else (ndc *. 2.) -. 1. in
   let fov_angle = 90. in
   let scale = degrees_to_radians (fov_angle *. 0.5) |> Float.tan in
   screenspace_coord *. scale
@@ -168,6 +199,8 @@ let render height width scene =
   for j = 0 to height - 1 do
     for i = 0 to width - 1 do
       let total_colour = ref { x = 0.; y = 0.; z = 0. } in
+      (* supersampling for basic antaliasing, each ray per sample has a slight random adjustment,
+         which we average out per pixel *)
       for _ = 0 to no_samples - 1 do
         (* map each x/y coord to ndc (map to real world) to calculate direction of ray *)
         let x = (raster_to_camera_coord i width false
@@ -184,25 +217,31 @@ let render height width scene =
   done;
   { data; width; height} 
 
-(* Calculate colours from given vectors, clamps max values to 255
-to prevent issues when diffuse light intensity is too high, and prints to file *)
+(* prints a framebuffer to a file.
+   Calculates colours from given vectors, clamps max values to 255
+   to prevent issues when diffuse light intensity is too high, and prints to file *)
 let print_fb filename { data; width; height } =
   let oc = open_out filename in
   let to_rgb_channel f =
-      ( f *. 255. ) |> Int.of_float |> min 255
+    ( f *. 255. ) |> Int.of_float |> min 255
+  in
+  let print_pixel p = 
+    Printf.fprintf oc "%i %i %i\n"
+      (to_rgb_channel p.x)
+      (to_rgb_channel p.y)
+      (to_rgb_channel p.z)
   in
   try
     Printf.fprintf oc "P3\n%i %i\n255\n" width height;
-    Array.iter (fun v ->
-        Printf.fprintf oc "%i %i %i\n"
-          (to_rgb_channel v.x)
-          (to_rgb_channel v.y)
-          (to_rgb_channel v.z))
-      data;
+    Array.iter print_pixel data;
     close_out oc
   with e ->
     close_out_noerr oc;
     raise e
+
+(***************
+ * ENTRY POINT *
+ ***************)
 
 let () =
   (* Set up materials *)
